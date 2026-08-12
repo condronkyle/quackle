@@ -435,6 +435,7 @@ protected:
 	unsigned int m_nestedness;
 	int m_scorelessTurnsInARow;
 	bool m_gameOver;
+	bool m_equalTurnsPending;
 	int m_tilesInBag;
 	int m_tilesOnRack;
 

@@ -42,6 +42,7 @@
 #include <quackleio/util.h>
 
 #include "trademarkedboards.h"
+#include "crossplayboards.h"
 #include "testharness.h"
 
 using namespace std;
@@ -261,7 +262,15 @@ void TestHarness::startUp()
 		delete flexure;
 	}
 
-	m_dataManager.setBoardParameters(new ScrabbleBoard());
+	if (m_alphabet == "crossplay")
+	{
+		m_dataManager.setBoardParameters(new CrossplayBoard());
+		m_dataManager.setParameters(new Quackle::CrossplayParameters());
+	}
+	else
+	{
+		m_dataManager.setBoardParameters(new ScrabbleBoard());
+	}
 
 	m_dataManager.lexiconParameters()->loadDawg(Quackle::LexiconParameters::findDictionaryFile(QuackleIO::Util::qstringToStdString(m_lexicon + ".dawg")));
 	UVcout << ".";

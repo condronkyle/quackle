@@ -189,6 +189,7 @@ GamePosition::GamePosition(const PlayerList &players)
 	, m_nestedness(0)
 	, m_scorelessTurnsInARow(0)
 	, m_gameOver(false)
+	, m_equalTurnsPending(false)
 	, m_tilesOnRack(QUACKLE_PARAMETERS->rackSize())
 {
 	setEmptyBoard();
@@ -206,6 +207,7 @@ GamePosition::GamePosition(const GamePosition &position)
 	, m_nestedness(position.m_nestedness)
 	, m_scorelessTurnsInARow(position.m_scorelessTurnsInARow)
 	, m_gameOver(position.m_gameOver)
+	, m_equalTurnsPending(position.m_equalTurnsPending)
 	, m_tilesInBag(position.m_tilesInBag)
 	, m_tilesOnRack(position.m_tilesOnRack)
 	, m_board(position.m_board)
@@ -236,6 +238,7 @@ const GamePosition &GamePosition::operator=(const GamePosition &position)
 	m_nestedness = position.m_nestedness;
 	m_scorelessTurnsInARow = position.m_scorelessTurnsInARow;
 	m_gameOver = position.m_gameOver;
+	m_equalTurnsPending = position.m_equalTurnsPending;
 	m_tilesInBag = position.m_tilesInBag;
 	m_tilesOnRack = position.m_tilesOnRack;
 	m_board = position.m_board;
@@ -264,6 +267,7 @@ GamePosition::GamePosition()
 	, m_nestedness(0)
 	, m_scorelessTurnsInARow(0)
 	, m_gameOver(false)
+	, m_equalTurnsPending(false)
 {
 	setEmptyBoard();
 	resetMoveMade();
@@ -866,17 +870,32 @@ bool GamePosition::incrementTurn(const History *history)
 		// player played out
 		if (m_bag.empty() && remainingRack.empty())
 		{
-			// magic!
-			++m_turnNumber;
-
 			if (!m_gameOver)
 			{
-				// we become over based on player playing out
-				// with empty bag
-				adjustScoresToFinishGame();
+				if (QUACKLE_PARAMETERS->equalTurnsEndgame() && !m_equalTurnsPending)
+				{
+					// Crossplay equal-turns rule: opponent gets one more turn
+					m_equalTurnsPending = true;
+				}
+				else
+				{
+					++m_turnNumber;
 
-				m_gameOver = true;
+					if (QUACKLE_PARAMETERS->equalTurnsEndgame())
+						adjustScoresToFinishPassedOutGame();
+					else
+						adjustScoresToFinishGame();
+
+					m_gameOver = true;
+				}
 			}
+		}
+		else if (m_equalTurnsPending && m_bag.empty())
+		{
+			// Equal turns: opponent finished their final turn
+			++m_turnNumber;
+			adjustScoresToFinishPassedOutGame();
+			m_gameOver = true;
 		}
 
 		if ((m_moveMade.action == Move::Place && m_moveMade.effectiveScore() == 0) || m_moveMade.action == Move::Exchange
