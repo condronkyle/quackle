@@ -130,6 +130,11 @@ public:
 	bool isBlank(int row, int col) const;
 	bool isBritish(int row, int col) const;
 
+	// Direct setters for board setup (e.g. WASM bindings)
+	void setLetterAt(int row, int col, Letter letter);
+	void setIsBlankAt(int row, int col, bool blank);
+	void setNotEmpty() { m_empty = false; }
+
 	const LetterBitset &vcross(int row, int col) const;
 	void setVCross(int row, int col, const LetterBitset &vcross);
 

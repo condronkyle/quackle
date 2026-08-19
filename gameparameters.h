@@ -43,12 +43,20 @@ public:
 	unsigned int overdrawPenalty() const;
 	void setOverdrawPenalty(unsigned int overdrawPenalty);
 
+	bool equalTurnsEndgame() const;
+	void setEqualTurnsEndgame(bool equalTurns);
+
+	bool noEndgamePenalty() const;
+	void setNoEndgamePenalty(bool noPenalty);
+
 protected:
 	int m_minimumTilesForExchange;
 	int m_numberOfScorelessTurnsThatEndsGame;
 	int m_bingoBonus;
 	int m_rackSize;
 	unsigned int m_overdrawPenalty;
+	bool m_equalTurnsEndgame;
+	bool m_noEndgamePenalty;
 };
 
 inline int GameParameters::minimumTilesForExchange() const
@@ -101,10 +109,36 @@ inline void GameParameters::setOverdrawPenalty(unsigned int overdrawPenalty)
 	m_overdrawPenalty = overdrawPenalty;
 }
 
+inline bool GameParameters::equalTurnsEndgame() const
+{
+	return m_equalTurnsEndgame;
+}
+
+inline void GameParameters::setEqualTurnsEndgame(bool equalTurns)
+{
+	m_equalTurnsEndgame = equalTurns;
+}
+
+inline bool GameParameters::noEndgamePenalty() const
+{
+	return m_noEndgamePenalty;
+}
+
+inline void GameParameters::setNoEndgamePenalty(bool noPenalty)
+{
+	m_noEndgamePenalty = noPenalty;
+}
+
 class EnglishParameters : public GameParameters
 {
 public:
 	EnglishParameters();
+};
+
+class CrossplayParameters : public GameParameters
+{
+public:
+	CrossplayParameters();
 };
 
 }

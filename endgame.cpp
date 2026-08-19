@@ -20,8 +20,10 @@
 #include <iostream>
 
 #include "computerplayer.h"
+#include "datamanager.h"
 #include "endgame.h"
 #include "game.h"
+#include "gameparameters.h"
 #include "move.h"
 
 // define this to get lame debugging messages
@@ -245,7 +247,8 @@ double Endgame::disappoint(EndgameMove &hope, double bestPessimistic)
 			levelNumber++;
 		}
 
-		m_endgameGame.currentPosition().adjustScoresToFinishGame();
+		if (!QUACKLE_PARAMETERS->noEndgamePenalty())
+			m_endgameGame.currentPosition().adjustScoresToFinishGame();
 
 		double afterSpread = m_endgameGame.currentPosition().spread(realStartPlayerId);
 
@@ -336,7 +339,8 @@ Move Endgame::solve(int /* nestedness */)
 		else
 			(*moveIt).outplay = false;
 
-		m_endgameGame.currentPosition().adjustScoresToFinishGame();
+		if (!QUACKLE_PARAMETERS->noEndgamePenalty())
+			m_endgameGame.currentPosition().adjustScoresToFinishGame();
 
 		double afterSpread = m_endgameGame.currentPosition().spread(startPlayerId);
 
@@ -442,7 +446,8 @@ void Endgame::reallyPlayOut(Move &chosenMove, int nestedness)
 		levelNumber++;
 	}
 
-	playoutGame.currentPosition().adjustScoresToFinishGame();
+	if (!QUACKLE_PARAMETERS->noEndgamePenalty())
+		playoutGame.currentPosition().adjustScoresToFinishGame();
 
 	double afterSpread = playoutGame.currentPosition().spread(startPlayerId);
 	double spread = afterSpread - beforeSpread;

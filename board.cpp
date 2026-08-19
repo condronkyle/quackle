@@ -548,6 +548,16 @@ LetterString Board::sanitizedTilesOfMove(const Move &move) const
 	return ret;
 }
 
+void Board::setLetterAt(int row, int col, Letter letter)
+{
+	m_letters[row][col] = letter;
+}
+
+void Board::setIsBlankAt(int row, int col, bool blank)
+{
+	m_isBlank[row][col] = blank;
+}
+
 void Board::makeMove(const Move &move)
 {
 	if (move.action == Move::Place)

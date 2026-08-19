@@ -98,15 +98,10 @@ bool StrategyParameters::loadBogowin(const string &filename)
 		return false;
 	}
 
-	while (!file.eof())
+	int lead, unseen;
+	double wins;
+	while (file >> lead >> unseen >> wins)
 	{
-		int lead, unseen;
-		double wins;
-
-		file >> lead;
-		file >> unseen;
-		file >> wins;
-
 		m_bogowin[lead + 300][unseen] = wins;
 	}
 

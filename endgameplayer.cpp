@@ -17,8 +17,11 @@
  */
 
 #include <iostream>
+#include <stdexcept>
 
+#include "datamanager.h"
 #include "endgameplayer.h"
+#include "gameparameters.h"
 
 // #define DEBUG_COMPUTERPLAYER
 
@@ -39,6 +42,12 @@ Move EndgamePlayer::move()
 
 MoveList EndgamePlayer::moves(int nmoves)
 {
+	if (QUACKLE_PARAMETERS->equalTurnsEndgame() && currentPosition().bag().empty()
+		&& !currentPosition().gameOver() && currentPosition().finalTurnsRemaining() == 0)
+	{
+		throw std::logic_error("Crossplay empty-bag position is missing its final-turn state");
+	}
+
 	if (currentPosition().bag().size() > 0)
 	{
 #ifdef DEBUG_ENDGAME

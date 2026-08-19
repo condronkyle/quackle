@@ -435,14 +435,18 @@ void Simulator::simulate(int plies, int iterations)
 	constants.ignoreOppos = m_ignoreOppos;
 	constants.isLogging = isLogging();
 
-	m_sendQueue.setConstants(constants);
-
 	if (isLogging() && !m_hasHeader)
 		writeLogHeader();
 
-	ensureThreads();
-
 	const UVString indent = playaheadIndent();
+	if (threadCount() == 0)
+	{
+		simulateSerially(constants, indent, iterations);
+		return;
+	}
+
+	m_sendQueue.setConstants(constants);
+	ensureThreads();
 
 	int remaining = iterations;
 	while (remaining > 0)
@@ -469,6 +473,69 @@ void Simulator::simulate(int plies, int iterations)
 		// drained and the log consistent, so the simulator remains usable.
 		if (firstError)
 			std::rethrow_exception(firstError);
+	}
+}
+
+void Simulator::simulateSerially(const SimmedMoveConstants &constants, const UVString &indent, int iterations)
+{
+	for (int i = 0; i < iterations; ++i)
+	{
+		if (m_dispatch && m_dispatch->shouldAbort())
+			break;
+
+		vector<SimmedMoveMessage> messages;
+		messages.reserve((size_t)includedMoveCount());
+		std::exception_ptr firstError;
+
+		for (size_t moveIndex = 0; moveIndex < m_simmedMoves.size(); ++moveIndex)
+		{
+			SimmedMove &moveIt = m_simmedMoves[moveIndex];
+			if (!moveIt.includeInSimulation())
+				continue;
+
+			moveIt.levels.setNumberLevels(constants.levelCount + 1);
+
+			SimmedMoveMessage message;
+			message.id = moveIt.id();
+			message.moveIndex = (int)moveIndex;
+			message.iteration = m_iterations + 1;
+			message.move = moveIt.move;
+			message.levels.setNumberLevels(constants.levelCount + 1);
+			message.xmlIndent = indent;
+
+			try
+			{
+				simulateOnePosition(message, constants);
+			}
+			catch (...)
+			{
+				firstError = std::current_exception();
+			}
+
+			messages.push_back(std::move(message));
+			if (firstError)
+				break;
+		}
+
+		if (firstError)
+			std::rethrow_exception(firstError);
+
+		if (isLogging())
+		{
+			m_logfileStream << m_xmlIndent << "<iteration index=\"" << m_iterations + 1 << "\">" << endl;
+			m_xmlIndent += MARK_UV('\t');
+		}
+
+		for (const auto &message : messages)
+			incorporateMessage(message);
+
+		if (isLogging())
+		{
+			m_xmlIndent = m_xmlIndent.substr(0, m_xmlIndent.length() - 1);
+			m_logfileStream << m_xmlIndent << "</iteration>" << endl;
+		}
+
+		++m_iterations;
 	}
 }
 
@@ -644,7 +711,7 @@ void Simulator::simulateOnePosition(SimmedMoveMessage &message, const SimmedMove
 				move = game.currentPosition().staticBestMove();
 
 			int deadwoodScore = 0;
-			if (game.currentPosition().doesMoveEndGame(move))
+			if (!QUACKLE_PARAMETERS->noEndgamePenalty() && game.currentPosition().doesMoveEndGame(move))
 			{
 				LetterString deadwood;
 				deadwoodScore = game.currentPosition().deadwood(&deadwood);
@@ -770,6 +837,7 @@ void Simulator::incorporateMessage(const SimmedMoveMessage &message)
 	move->residual.incorporateValue(message.residual);
 	move->gameSpread.incorporateValue(message.gameSpread);
 	move->wins.incorporateValue(message.wins);
+	move->terminalResults.incorporateValue(message.bogowin ? 0 : 1);
 
 	if (isLogging())
 	{
@@ -1010,6 +1078,7 @@ void SimmedMove::clear()
 	residual.clear();
 	gameSpread.clear();
 	wins.clear();
+	terminalResults.clear();
 }
 
 PositionStatistics SimmedMove::getPositionStatistics(int level, int playerIndex) const

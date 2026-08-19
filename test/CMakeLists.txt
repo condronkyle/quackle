@@ -27,6 +27,8 @@ add_executable(libquackle_test
 	testmain.cpp
 	trademarkedboards.cpp
 	trademarkedboards.h
+	crossplayboards.cpp
+	crossplayboards.h
 )
 target_link_libraries(libquackle_test quackleio quackle ${QUACKLE_TEST_QT_CORE})
 
