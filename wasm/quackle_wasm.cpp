@@ -472,6 +472,7 @@ emscripten::val kibitz(std::string gridJson, std::string rackStr, int playerScor
 emscripten::val simulateKibitz(std::string gridJson, std::string rackStr, int playerScore, int oppScore,
 							  int numMoves, int iterations, int bagCount, int finalTurnsRemaining)
 {
+	const int maxSimulationIterations = 277;
 	// Candidate plus two future moves can draw at most three full racks.
 	const int terminalSimulationBagLimit = QUACKLE_PARAMETERS->rackSize() * 3;
 	const bool playToEnd = bagCount >= 0 && bagCount <= terminalSimulationBagLimit;
@@ -492,9 +493,9 @@ emscripten::val simulateKibitz(std::string gridJson, std::string rackStr, int pl
         result.set("error", std::string("Engine not initialized"));
         return result;
     }
-    if (iterations <= 0 || iterations > 230)
+    if (iterations <= 0 || iterations > maxSimulationIterations)
     {
-        result.set("error", std::string("Simulation iterations must be between 1 and 230"));
+        result.set("error", std::string("Simulation iterations must be between 1 and 277"));
         return result;
     }
     Quackle::Game game;
