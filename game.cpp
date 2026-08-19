@@ -189,7 +189,7 @@ GamePosition::GamePosition(const PlayerList &players)
 	, m_nestedness(0)
 	, m_scorelessTurnsInARow(0)
 	, m_gameOver(false)
-	, m_equalTurnsPending(false)
+	, m_finalTurnsRemaining(0)
 	, m_tilesOnRack(QUACKLE_PARAMETERS->rackSize())
 {
 	setEmptyBoard();
@@ -207,7 +207,7 @@ GamePosition::GamePosition(const GamePosition &position)
 	, m_nestedness(position.m_nestedness)
 	, m_scorelessTurnsInARow(position.m_scorelessTurnsInARow)
 	, m_gameOver(position.m_gameOver)
-	, m_equalTurnsPending(position.m_equalTurnsPending)
+	, m_finalTurnsRemaining(position.m_finalTurnsRemaining)
 	, m_tilesInBag(position.m_tilesInBag)
 	, m_tilesOnRack(position.m_tilesOnRack)
 	, m_board(position.m_board)
@@ -238,7 +238,7 @@ const GamePosition &GamePosition::operator=(const GamePosition &position)
 	m_nestedness = position.m_nestedness;
 	m_scorelessTurnsInARow = position.m_scorelessTurnsInARow;
 	m_gameOver = position.m_gameOver;
-	m_equalTurnsPending = position.m_equalTurnsPending;
+	m_finalTurnsRemaining = position.m_finalTurnsRemaining;
 	m_tilesInBag = position.m_tilesInBag;
 	m_tilesOnRack = position.m_tilesOnRack;
 	m_board = position.m_board;
@@ -267,7 +267,7 @@ GamePosition::GamePosition()
 	, m_nestedness(0)
 	, m_scorelessTurnsInARow(0)
 	, m_gameOver(false)
-	, m_equalTurnsPending(false)
+	, m_finalTurnsRemaining(0)
 {
 	setEmptyBoard();
 	resetMoveMade();
@@ -695,6 +695,10 @@ void GamePosition::setPlayerRack(int playerID, const Rack &rack, bool adjustBag)
 			}
 
 			it.setRack(rack);
+			if (adjustBag)
+				m_tilesInBag = m_bag.size();
+			if (m_currentPlayer != m_players.end() && playerID == m_currentPlayer->id())
+				m_tilesOnRack = (int)rack.tiles().size();
 		}
 	}
 }
@@ -792,9 +796,37 @@ void GamePosition::resetMoveMade()
 	m_committedMove = Move::createNonmove();
 }
 
+void GamePosition::setMoveMade(const Move &move)
+{
+	m_moveMade = move;
+	if (m_gameOver && move.action != Quackle::Move::UnusedTilesBonus && move.action != Quackle::Move::UnusedTilesBonusError)
+	{
+		m_gameOver = false; // apparently the game isn't over...somebody's force-feeding us bad plays
+		--m_turnNumber;
+		m_moveMade.action = Quackle::Move::PlaceError;
+		m_explanatoryNote = "Quackle says: Tiles were drawn out of order, leading to extra turns";
+		if (QUACKLE_PARAMETERS->equalTurnsEndgame() && m_bag.empty())
+			m_finalTurnsRemaining = 1;
+		if (++m_currentPlayer == m_players.end())
+			m_currentPlayer = m_players.begin();
+	}
+}
+
 void GamePosition::resetBag()
 {
 	m_bag.prepareFullBag();
+	m_finalTurnsRemaining = 0;
+}
+
+bool GamePosition::setFinalTurnsRemaining(int turns)
+{
+	if (turns < 0 || turns > (int)m_players.size())
+		return false;
+	if (turns > 0 && (!QUACKLE_PARAMETERS->equalTurnsEndgame() || !m_bag.empty()))
+		return false;
+
+	m_finalTurnsRemaining = turns;
+	return true;
 }
 
 bool GamePosition::incrementTurn(const History *history)
@@ -810,6 +842,9 @@ bool GamePosition::incrementTurn(const History *history)
 	// and go to first player after incrementing
 	if (m_currentPlayer != m_players.end())
 	{
+		const bool crossplayFinalTurns = QUACKLE_PARAMETERS->equalTurnsEndgame();
+		const bool consumesFinalTurn = crossplayFinalTurns && m_finalTurnsRemaining > 0;
+		const bool bagWasNonempty = !m_bag.empty();
 		Rack remainingRack(currentPlayer().rack() - m_moveMade);
 
 		Rack moveTiles(m_moveMade.usedTiles());
@@ -867,35 +902,16 @@ bool GamePosition::incrementTurn(const History *history)
 		// adding endgame bonuses
 		currentPlayer().addToScore(m_moveMade.effectiveScore());
 
-		// player played out
-		if (m_bag.empty() && remainingRack.empty())
+		// Standard Scrabble ends when a player goes out with an empty bag.
+		// Crossplay rack-out has no special meaning.
+		if (!crossplayFinalTurns && m_bag.empty() && remainingRack.empty())
 		{
 			if (!m_gameOver)
 			{
-				if (QUACKLE_PARAMETERS->equalTurnsEndgame() && !m_equalTurnsPending)
-				{
-					// Crossplay equal-turns rule: opponent gets one more turn
-					m_equalTurnsPending = true;
-				}
-				else
-				{
-					++m_turnNumber;
-
-					if (QUACKLE_PARAMETERS->equalTurnsEndgame())
-						adjustScoresToFinishPassedOutGame();
-					else
-						adjustScoresToFinishGame();
-
-					m_gameOver = true;
-				}
+				++m_turnNumber;
+				adjustScoresToFinishGame();
+				m_gameOver = true;
 			}
-		}
-		else if (m_equalTurnsPending && m_bag.empty())
-		{
-			// Equal turns: opponent finished their final turn
-			++m_turnNumber;
-			adjustScoresToFinishPassedOutGame();
-			m_gameOver = true;
 		}
 
 		if ((m_moveMade.action == Move::Place && m_moveMade.effectiveScore() == 0) || m_moveMade.action == Move::Exchange
@@ -904,7 +920,32 @@ bool GamePosition::incrementTurn(const History *history)
 		else
 			m_scorelessTurnsInARow = 0;
 
-		if (!m_gameOver)
+		// Refill before checking the Crossplay finish state. The move that
+		// draws the last bag tile triggers, but does not consume, a final turn.
+		replenishAndSetRack(remainingRack);
+
+		if (!m_gameOver && crossplayFinalTurns)
+		{
+			if (consumesFinalTurn)
+			{
+				--m_finalTurnsRemaining;
+				if (m_finalTurnsRemaining == 0)
+				{
+					PlayerList::iterator nextPlayer = m_currentPlayer;
+					++nextPlayer;
+					if (nextPlayer != m_players.end())
+						++m_turnNumber;
+					adjustScoresToFinishPassedOutGame();
+					m_gameOver = true;
+				}
+			}
+			else if (m_moveMade.action == Move::Place && bagWasNonempty && m_bag.empty())
+			{
+				m_finalTurnsRemaining = (int)m_players.size();
+			}
+		}
+
+		if (!m_gameOver && (!crossplayFinalTurns || m_finalTurnsRemaining == 0))
 		{
 			if (QUACKLE_PARAMETERS->numberOfScorelessTurnsThatEndsGame() >= 0
 				&& m_scorelessTurnsInARow >= QUACKLE_PARAMETERS->numberOfScorelessTurnsThatEndsGame() && !m_board.isEmpty())
@@ -917,9 +958,6 @@ bool GamePosition::incrementTurn(const History *history)
 				m_gameOver = true;
 			}
 		}
-
-		// refill rack of player that just played
-		replenishAndSetRack(remainingRack);
 
 		// now move onto next player
 		++m_currentPlayer;
@@ -1080,7 +1118,9 @@ PlayerList GamePosition::endgameAdjustedScores() const
 	{
 		Player adjustedPlayer(it);
 
-		if (gameOver() && adjustedPlayer == currentPlayer())
+		if (gameOver() && adjustedPlayer == currentPlayer()
+			&& (m_moveMade.action == Move::UnusedTilesBonus
+				|| m_moveMade.action == Move::UnusedTilesBonusError))
 		{
 			adjustedPlayer.addToScore(m_moveMade.effectiveScore());
 		}
@@ -1131,6 +1171,14 @@ int GamePosition::spread(int playerID) const
 
 void GamePosition::adjustScoresToFinishPassedOutGame()
 {
+	if (QUACKLE_PARAMETERS->noEndgamePenalty())
+	{
+		// The real final move lives on the prior history frame. The terminal
+		// frame needs no synthetic rack adjustment.
+		resetMoveMade();
+		return;
+	}
+
 	for (auto &it : m_players)
 	{
 		if (it == currentPlayer())
@@ -1175,6 +1223,8 @@ int GamePosition::deadwood(LetterString *tiles) const
 
 bool GamePosition::doesMoveEndGame(const Move &move) const
 {
+	if (QUACKLE_PARAMETERS->equalTurnsEndgame())
+		return m_finalTurnsRemaining == 1;
 	return (currentPlayer().rack() - move).empty() && m_bag.empty();
 }
 

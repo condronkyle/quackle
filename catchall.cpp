@@ -19,6 +19,7 @@
 #include "board.h"
 #include "datamanager.h"
 #include "game.h"
+#include "gameparameters.h"
 #include "strategyparameters.h"
 #include "catchall.h"
 
@@ -69,6 +70,8 @@ double CatchallEvaluator::equity(const GamePosition &position, const Move &move)
 	}
 	else
 	{
+		if (QUACKLE_PARAMETERS->noEndgamePenalty())
+			return move.score;
 		return endgameResult(position, move) + move.score;
 	}
 }

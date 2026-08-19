@@ -23,6 +23,7 @@
 #include <algorithm>
 
 #include <bogowinplayer.h>
+#include <catchall.h>
 #include <computerplayercollection.h>
 #include <resolvent.h>
 #include <datamanager.h>
@@ -989,7 +990,7 @@ void checkAccumulators(const Quackle::GamePosition &position)
 	for (const auto &it : simulator.simmedMoves())
 	{
 		if (it.residual.incorporatedValues() != iterations || it.gameSpread.incorporatedValues() != iterations
-			|| it.wins.incorporatedValues() != iterations)
+			|| it.wins.incorporatedValues() != iterations || it.terminalResults.incorporatedValues() != iterations)
 			evenlySampled = false;
 
 		// level one, player one is the candidate itself; always played
@@ -1174,6 +1175,301 @@ bool sampledExactly(const Quackle::Simulator &simulator, int iterations)
 	return any;
 }
 
+int playerScore(const Quackle::GamePosition &position, int playerId)
+{
+	for (const auto &player : position.endgameAdjustedScores())
+		if (player.id() == playerId)
+			return player.score();
+	return 0;
+}
+
+Quackle::Move scoredPlace(const UVString &letters, int score)
+{
+	Quackle::Move move = Quackle::Move::createPlaceMove(7, 7, true,
+		QUACKLE_ALPHABET_PARAMETERS->encode(letters));
+	move.score = score;
+	return move;
+}
+
+Quackle::Move scoredPlaceAt(const UVString &letters, int score, int row, int column)
+{
+	Quackle::Move move = Quackle::Move::createPlaceMove(row, column, true,
+		QUACKLE_ALPHABET_PARAMETERS->encode(letters));
+	move.score = score;
+	return move;
+}
+
+void commitSyntheticMove(Quackle::GamePosition &position, const Quackle::Move &move)
+{
+	position.setMoveMade(move);
+	position.setCommittedMove(move);
+	position.incrementTurn();
+}
+
+void checkCrossplayFinalTurns()
+{
+	if (!QUACKLE_PARAMETERS->equalTurnsEndgame() || !QUACKLE_PARAMETERS->noEndgamePenalty())
+		return;
+	check(QUACKLE_PARAMETERS->numberOfScorelessTurnsThatEndsGame() == -1,
+		"Crossplay does not use the Scrabble scoreless-turn finish");
+
+	Quackle::PlayerList players;
+	Quackle::Player first(MARK_UV("First"), Quackle::Player::HumanPlayerType, 0);
+	Quackle::Player second(MARK_UV("Second"), Quackle::Player::HumanPlayerType, 1);
+	first.setScore(100);
+	second.setScore(90);
+	players.push_back(first);
+	players.push_back(second);
+
+	Quackle::GamePosition position(players);
+	position.incrementTurn();
+	position.setPlayerRack(0, Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("AB"))), false);
+	position.setPlayerRack(1, Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("DE"))), false);
+	position.setBag(Quackle::Bag(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("C"))));
+
+	check(!position.setFinalTurnsRemaining(1), "a nonempty bag rejects a reconstructed final phase");
+	commitSyntheticMove(position, scoredPlace(MARK_UV("A"), 10));
+
+	check(!position.gameOver(), "drawing the last bag tile does not end Crossplay");
+	check(position.finalTurnsRemaining() == 2, "bag depletion starts two final turns");
+
+	Quackle::GamePosition copied(position);
+	Quackle::GamePosition assigned;
+	assigned = position;
+	check(copied.finalTurnsRemaining() == 2, "copy construction preserves final turns");
+	check(assigned.finalTurnsRemaining() == 2, "assignment preserves final turns");
+
+	commitSyntheticMove(position, scoredPlace(MARK_UV("D"), 8));
+	check(!position.gameOver(), "the first final turn does not end Crossplay");
+	check(position.finalTurnsRemaining() == 1, "the first final turn decrements the countdown");
+	check(position.doesMoveEndGame(scoredPlace(MARK_UV("B"), 5)),
+		"the last final turn is recognized as game-ending");
+
+	commitSyntheticMove(position, scoredPlace(MARK_UV("B"), 5));
+	check(position.gameOver(), "Crossplay ends after both final turns");
+	check(position.finalTurnsRemaining() == 0, "the terminal countdown is zero");
+	check(playerScore(position, 0) == 115, "Crossplay counts each first-player placement once");
+	check(playerScore(position, 1) == 98, "Crossplay counts the opponent placement once");
+	check(position.spread(0) == 17, "Crossplay applies no final rack adjustment");
+	commitSyntheticMove(position, scoredPlace(MARK_UV("C"), 4));
+	check(position.gameOver(), "an extra parsed move re-closes a completed Crossplay game");
+	check(position.finalTurnsRemaining() == 0,
+		"an extra parsed move consumes its restored final-turn state");
+
+	Quackle::GamePosition reconstructed(players);
+	reconstructed.incrementTurn();
+	reconstructed.setPlayerRack(0, Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("A"))), false);
+	reconstructed.setPlayerRack(1, Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("B"))), false);
+	reconstructed.setBag(Quackle::Bag(Quackle::LetterString()));
+	check(!reconstructed.setFinalTurnsRemaining(3), "the final-turn setter rejects an invalid count");
+	check(reconstructed.setFinalTurnsRemaining(2), "an empty bag accepts an explicit final phase");
+
+	Quackle::Move zeroPointRackOut = scoredPlace(MARK_UV("A"), 0);
+	commitSyntheticMove(reconstructed, zeroPointRackOut);
+	check(!reconstructed.gameOver(), "rack-out does not end the first Crossplay final turn");
+	check(reconstructed.finalTurnsRemaining() == 1, "a zero-point placement consumes one final turn");
+	commitSyntheticMove(reconstructed, Quackle::Move::createPassMove());
+	check(reconstructed.gameOver(), "a pass consumes the last Crossplay final turn");
+}
+
+void checkCrossplayFinalTurnHistory()
+{
+	if (!QUACKLE_PARAMETERS->equalTurnsEndgame())
+		return;
+
+	Quackle::PlayerList players;
+	Quackle::Player first(MARK_UV("First"), Quackle::Player::HumanPlayerType, 0);
+	Quackle::Player second(MARK_UV("Second"), Quackle::Player::HumanPlayerType, 1);
+	first.setAbbreviatedName(MARK_UV("F"));
+	second.setAbbreviatedName(MARK_UV("S"));
+	first.setScore(100);
+	second.setScore(90);
+	players.push_back(first);
+	players.push_back(second);
+
+	Quackle::Game game;
+	game.setPlayers(players);
+	game.addPosition();
+	game.currentPosition().setPlayerRack(0,
+		Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("AB"))), false);
+	game.currentPosition().setPlayerRack(1,
+		Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("DE"))), false);
+	const Quackle::LetterString lastDraw = QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("C"));
+	game.currentPosition().setBag(Quackle::Bag(lastDraw));
+	game.currentPosition().setDrawingOrder(lastDraw);
+
+	game.commitMove(scoredPlace(MARK_UV("A"), 10));
+	game.commitMove(Quackle::Move::createPassMove());
+	Quackle::Move finalMove = Quackle::Move::createPlaceMove(7, 8, true,
+		QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("B")));
+	finalMove.score = 0;
+	game.commitMove(finalMove);
+
+	const Quackle::History &history = game.history();
+	check(history.size() == 4, "Crossplay history has one frame per move plus the terminal frame");
+	check(history[0].committedMove().action == Quackle::Move::Place,
+		"history records the bag-depleting placement");
+	check(history[1].committedMove().action == Quackle::Move::Pass,
+		"history records the first final turn");
+	check(history[2].committedMove().action == Quackle::Move::Place,
+		"history records the second final turn");
+	check(!history[3].committedMove().isAMove(), "the terminal frame has no synthetic move");
+	check(!(history[2].location() == history[3].location()),
+		"the terminal frame has a unique history location");
+	check(history[3].location().turnNumber() == history[2].location().turnNumber() + 1,
+		"a first-player terminal turn advances history once");
+
+	bool previousExists = false;
+	const Quackle::GamePosition &previous = history.previousPosition(&previousExists);
+	check(previousExists && &previous == &history[2],
+		"history navigation resolves the real final move");
+	check(game.currentPosition().board().letter(7, 8) != QUACKLE_NULL_MARK,
+		"the terminal board contains the final placement");
+	check(playerScore(game.currentPosition(), 0) == 110 && playerScore(game.currentPosition(), 1) == 90,
+		"history preserves scores without rack adjustments");
+
+	QString gcg;
+	QTextStream stream(&gcg);
+	QuackleIO::GCGIO io;
+	io.write(game, stream);
+	int moveLines = 0;
+	for (const QString &line : gcg.split('\n'))
+		if (line.startsWith('>'))
+			++moveLines;
+	check(moveLines == 3, "GCG output contains exactly the three real turns");
+	check(!gcg.contains("UnusedTilesBonus"), "GCG output has no synthetic rack adjustment");
+
+	Quackle::Game secondTerminalGame;
+	secondTerminalGame.setPlayers(players);
+	secondTerminalGame.addPosition();
+	secondTerminalGame.currentPosition().setPlayerRack(0,
+		Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("AAAAAAA"))), false);
+	secondTerminalGame.currentPosition().setPlayerRack(1,
+		Quackle::Rack(QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("BBBBBBB"))), false);
+	secondTerminalGame.currentPosition().setBag(Quackle::Bag(lastDraw));
+	secondTerminalGame.currentPosition().setDrawingOrder(lastDraw);
+	secondTerminalGame.commitMove(Quackle::Move::createPassMove());
+	check(secondTerminalGame.currentPosition().finalTurnsRemaining() == 0,
+		"an opening pass does not start the final phase");
+	check(secondTerminalGame.currentPosition().currentPlayer().id() == 1,
+		"the second player follows the opening pass");
+	check(secondTerminalGame.currentPosition().bag().size() == 1,
+		"the opening pass leaves the final bag tile in place");
+	secondTerminalGame.commitMove(scoredPlaceAt(MARK_UV("B"), 7, 7, 7));
+	check(secondTerminalGame.currentPosition().bag().empty(),
+		"the second player draws the final bag tile");
+	check(secondTerminalGame.currentPosition().finalTurnsRemaining() == 2,
+		"a second-player bag depletion starts two final turns");
+	secondTerminalGame.commitMove(scoredPlaceAt(MARK_UV("A"), 3, 8, 7));
+	check(secondTerminalGame.currentPosition().finalTurnsRemaining() == 1,
+		"the first final turn advances to the second player");
+	secondTerminalGame.commitMove(scoredPlaceAt(MARK_UV("B"), 4, 9, 7));
+	const Quackle::History &secondHistory = secondTerminalGame.history();
+	check(secondTerminalGame.currentPosition().gameOver(),
+		"Crossplay can finish with the second player as the terminal actor");
+	check(secondHistory.back().location().turnNumber()
+		== secondHistory[secondHistory.size() - 2].location().turnNumber() + 1,
+		"a second-player terminal turn advances history once");
+}
+
+void checkSerialSimulation(const Quackle::GamePosition &position)
+{
+	Quackle::Simulator simulator;
+	simulator.setThreadCount(0);
+	simulator.setPosition(position);
+
+	const int iterations = 5;
+	simulator.simulate(2, iterations);
+
+	check(simulator.threadCount() == 0, "zero worker threads selects serial simulation");
+	check(simulator.iterations() == iterations, "serial simulation runs exactly the iterations asked");
+	check(sampledExactly(simulator, iterations), "serial simulation samples every candidate evenly");
+}
+
+void checkCrossplayFinalPhaseSimulation()
+{
+	if (!QUACKLE_PARAMETERS->equalTurnsEndgame())
+		return;
+
+	Quackle::PlayerList players;
+	Quackle::Player first(MARK_UV("First"), Quackle::Player::HumanPlayerType, 0);
+	Quackle::Player second(MARK_UV("Second"), Quackle::Player::HumanPlayerType, 1);
+	first.setScore(100);
+	second.setScore(90);
+	players.push_back(first);
+	players.push_back(second);
+
+	Quackle::GamePosition position(players);
+	position.incrementTurn();
+	const Quackle::Letter a = QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("A"))[0];
+	const Quackle::Letter b = QUACKLE_ALPHABET_PARAMETERS->encode(MARK_UV("B"))[0];
+	position.setPlayerRack(0, Quackle::Rack(Quackle::LetterString(1, a)), false);
+	position.setPlayerRack(1, Quackle::Rack(Quackle::LetterString(1, b)), false);
+
+	Quackle::Bag boardTiles;
+	boardTiles.removeLetter(a);
+	boardTiles.removeLetter(b);
+	const auto tiles = boardTiles.shuffledTiles();
+	Quackle::Board &board = position.underlyingBoardReference();
+	board.prepareEmptyBoard();
+	for (size_t i = 0; i < tiles.size(); ++i)
+	{
+		const bool blank = tiles[i] == QUACKLE_BLANK_MARK;
+		board.setLetterAt((int)(i / 15), (int)(i % 15),
+			blank ? QUACKLE_ALPHABET_PARAMETERS->setBlankness(a) : tiles[i]);
+		board.setIsBlankAt((int)(i / 15), (int)(i % 15), blank);
+	}
+	board.setNotEmpty();
+	position.setBag(Quackle::Bag(Quackle::LetterString()));
+	check(position.setFinalTurnsRemaining(2), "the simulation fixture starts in a two-turn final phase");
+
+	Quackle::CatchallEvaluator evaluator;
+	const Quackle::Move highScore = scoredPlace(MARK_UV("A"), 8);
+	const Quackle::Move lowerRackOut = scoredPlace(MARK_UV("AB"), 6);
+	check(evaluator.equity(position, highScore) > evaluator.equity(position, lowerRackOut),
+		"Crossplay final-turn equity prefers score over a lower rack-out");
+
+	Quackle::GamePosition invalidFinalPhase(position);
+	invalidFinalPhase.setFinalTurnsRemaining(0);
+	Quackle::EndgamePlayer invalidEndgamePlayer;
+	invalidEndgamePlayer.setPosition(invalidFinalPhase);
+	bool rejectedInvalidPhase = false;
+	try
+	{
+		invalidEndgamePlayer.move();
+	}
+	catch (const std::logic_error &)
+	{
+		rejectedInvalidPhase = true;
+	}
+	check(rejectedInvalidPhase, "the endgame solver rejects an empty bag without final-turn state");
+
+	Quackle::GamePosition lastFinalTurn(position);
+	check(lastFinalTurn.setFinalTurnsRemaining(1), "the solver fixture accepts the last final turn");
+	Quackle::EndgamePlayer endgamePlayer;
+	endgamePlayer.setPosition(lastFinalTurn);
+	check(endgamePlayer.move().action == Quackle::Move::Pass,
+		"the Crossplay endgame solver completes a forced final pass");
+
+	Quackle::MoveList candidates;
+	candidates.push_back(Quackle::Move::createPassMove());
+	position.setMoves(candidates);
+
+	Quackle::Simulator simulator;
+	simulator.setThreadCount(0);
+	simulator.setIgnoreOppos(true);
+	simulator.setPosition(position);
+	simulator.simulate(1, 1);
+
+	const Quackle::SimmedMove &result = simulator.simmedMoves().front();
+	check(result.gameSpread.averagedValue() == 10,
+		"the simulator reaches the exact spread after both final turns");
+	check(result.wins.averagedValue() == 1,
+		"the simulator uses the terminal win instead of Bogowin");
+	check(result.terminalResults.averagedValue() == 1,
+		"the simulator records an exact terminal result");
+}
+
 // SmartBogowin's shape: one candidate, many iterations. Nothing else in this
 // mode leaves the pool with so little to chew on per iteration.
 void checkSingleCandidateBatch(const Quackle::GamePosition &position)
@@ -1293,6 +1589,10 @@ void TestHarness::simulation()
 	game.currentPosition().kibitz(4);
 
 	checkAccumulators(game.currentPosition());
+	checkCrossplayFinalTurns();
+	checkCrossplayFinalTurnHistory();
+	checkSerialSimulation(game.currentPosition());
+	checkCrossplayFinalPhaseSimulation();
 	checkLog(game.currentPosition());
 	checkSingleCandidateBatch(game.currentPosition());
 	checkAbort(game.currentPosition());

@@ -4,6 +4,8 @@
 .tags*
 .vs
 build*
+!wasm/build.sh
+wasm/dist/
 obj
 Makefile
 Makefile.Debug

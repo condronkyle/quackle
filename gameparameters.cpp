@@ -21,7 +21,7 @@
 using namespace Quackle;
 
 GameParameters::GameParameters()
-	: m_minimumTilesForExchange(0), m_numberOfScorelessTurnsThatEndsGame(-1), m_bingoBonus(0), m_rackSize(7), m_overdrawPenalty(2), m_equalTurnsEndgame(false)
+	: m_minimumTilesForExchange(0), m_numberOfScorelessTurnsThatEndsGame(-1), m_bingoBonus(0), m_rackSize(7), m_overdrawPenalty(2), m_equalTurnsEndgame(false), m_noEndgamePenalty(false)
 {
 }
 
@@ -40,8 +40,11 @@ EnglishParameters::EnglishParameters()
 CrossplayParameters::CrossplayParameters()
 {
 	m_minimumTilesForExchange = 7;
-	m_numberOfScorelessTurnsThatEndsGame = 6;
+	// Crossplay ends after both players take one final turn following bag
+	// depletion. It does not use Scrabble's six-scoreless-turn finish.
+	m_numberOfScorelessTurnsThatEndsGame = -1;
 	m_bingoBonus = 40;
 	m_rackSize = 7;
 	m_equalTurnsEndgame = true;
+	m_noEndgamePenalty = true;
 }

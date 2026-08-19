@@ -218,6 +218,8 @@ public:
 	// all tiles not on board or players'
 	// (probably) filled racks
 	const Bag &bag() const;
+	// For a live Crossplay snapshot, follow setBag(empty) immediately with
+	// setFinalTurnsRemaining(1 or 2) before invoking a player or solver.
 
 	// Set drawing order, starting from back of drawingOrder.
 	// The drawing order is reset to randomness after letters
@@ -296,10 +298,13 @@ public:
 	// as above, but treating playerID as current player
 	int spread(int playerID) const;
 
-	// returns true when there is a player with an empty rack and the bag
-	// is empty, so in all frames after the frame containing a player
-	// making the final move, gameOver is true
+	// Returns true after the game has reached its configured finish state.
 	bool gameOver() const;
+
+	// Crossplay uses 0 outside the final phase and counts down from the
+	// number of players after a refill empties the bag.
+	int finalTurnsRemaining() const;
+	bool setFinalTurnsRemaining(int turns);
 
 	// the move made will
 	// be set to the proper UnusedTilesBonus move.
@@ -435,7 +440,7 @@ protected:
 	unsigned int m_nestedness;
 	int m_scorelessTurnsInARow;
 	bool m_gameOver;
-	bool m_equalTurnsPending;
+	int m_finalTurnsRemaining;
 	int m_tilesInBag;
 	int m_tilesOnRack;
 
@@ -510,6 +515,9 @@ inline const Bag &GamePosition::bag() const
 inline void GamePosition::setBag(const Bag &bag)
 {
 	m_bag = bag;
+	m_tilesInBag = m_bag.size();
+	if (!m_bag.empty())
+		m_finalTurnsRemaining = 0;
 }
 
 inline void GamePosition::setDrawingOrder(const LetterString &drawingOrder)
@@ -542,20 +550,9 @@ inline bool GamePosition::gameOver() const
 	return m_gameOver;
 }
 
-inline void GamePosition::setMoveMade(const Move &move)
+inline int GamePosition::finalTurnsRemaining() const
 {
-	m_moveMade = move;
-	if (m_gameOver && move.action != Quackle::Move::UnusedTilesBonus && move.action != Quackle::Move::UnusedTilesBonusError)
-	{
-		m_gameOver = false; // apparently the game isn't over...somebody's force-feeding us bad plays
-		--m_turnNumber;
-		m_moveMade.action = Quackle::Move::PlaceError;
-		m_explanatoryNote = "Quackle says: Tiles were drawn out of order, leading to extra turns";
-		if (++m_currentPlayer == m_players.end())
-		{
-			m_currentPlayer = m_players.begin();
-		}
-	}
+	return m_finalTurnsRemaining;
 }
 
 inline const Move &GamePosition::moveMade() const

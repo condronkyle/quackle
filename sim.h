@@ -177,6 +177,8 @@ struct SimmedMove
 	AveragedValue residual;
 	AveragedValue gameSpread;
 	AveragedValue wins;
+	// 1 for an exact terminal result, 0 for a horizon Bogowin estimate.
+	AveragedValue terminalResults;
 
 	PositionStatistics getPositionStatistics(int level, int playerIndex) const;
 
@@ -327,8 +329,9 @@ public:
 
 	static void simThreadFunc(SimmedMoveMessageQueue &incoming, SimmedMoveMessageQueue &outgoing, ThreadQoS qos);
 
+	// A count of zero runs simulations serially on the calling thread.
 	// A change of QoS recycles the whole pool, not just the threads added.
-	// Threads are not started until the first simulate().
+	// Worker threads are not started until the first simulate().
 	void setThreadCount(size_t count, ThreadQoS qos = ThreadQoS::Balanced);
 	size_t threadCount() const;
 	ThreadQoS threadQoS() const;
@@ -400,6 +403,7 @@ public:
 	int numPlayersAtLevel(int levelIndex) const;
 
 protected:
+	void simulateSerially(const SimmedMoveConstants &constants, const UVString &indent, int iterations);
 	void writeLogHeader();
 	void writeLogFooter();
 
